@@ -19,7 +19,8 @@ TrinketMenu.CheckOptInfo = {
 {"LargeCooldown","ON","Large Numbers","Display the cooldown time in a larger font.","CooldownCount"},
 {"ShowHotKeys","ON","Show Key Bindings","Display the key bindings over the equipped trinkets."},
 {"StopOnSwap","OFF","Stop Queue On Swap","Swapping a passive trinket stops an auto queue.  Check this to also stop the auto queue when a clickable trinket is manually swapped in via TrinketMenu.  This will have the most use to those with frequent trinkets marked Priority."},
-{"HideOnLoad","OFF","Close On Profile Load","Check this to dismiss this window when you load a profile."}
+{"HideOnLoad","OFF","Close On Profile Load","Check this to dismiss this window when you load a profile."},
+{"MergedQueue","OFF","Merged Queue Mode","Use a single priority list for both trinket slots instead of separate lists. Higher priority trinkets will be equipped to whichever slot becomes available first."}
 }
 
 -- table.insert(TrinketMenu.CheckOptInfo,)
@@ -44,7 +45,7 @@ function TrinketMenu.InitOptions()
 	TrinketMenu.MoveMinimapButton()
 	local item
 	for i=1,table.getn(TrinketMenu.CheckOptInfo) do
-		item = getglobal("TrinketMenu_Opt"..TrinketMenu.CheckOptInfo[i][1].."Text")
+		item = _G["TrinketMenu_Opt"..TrinketMenu.CheckOptInfo[i][1].."Text"]
 		if item then
 			item:SetText(TrinketMenu.CheckOptInfo[i][3])
 			item:SetTextColor(.95,.95,.95)
@@ -61,6 +62,7 @@ function TrinketMenu.InitOptions()
 		TrinketMenu_Tab1:Show()
 		TrinketMenu_OptFrame:SetHeight(326)
 		TrinketMenu_SubOptFrame:SetPoint("TOPLEFT",TrinketMenu_OptFrame,"TOPLEFT",8,-50)
+		TrinketMenu.ReflectMergedMode()
 	else
 		TrinketMenu_OptStopOnSwap:Hide() -- remove StopOnSwap option if queue not loaded
 		TrinketMenu_Tab1:Hide() -- hide options tab if it's only tab
@@ -83,7 +85,13 @@ end
 
 function TrinketMenu.OptFrame_OnShow()
 	TrinketMenu.ValidateChecks()
-	if TrinketMenu.CurrentlySorting then
+	TrinketMenu.ReflectMergedMode()
+	if TrinketMenuQueue and TrinketMenuQueue.MergedMode then
+		-- In merged mode, show the queue frame with merged list
+		TrinketMenu_SubOptFrame:Hide()
+		TrinketMenu_SubQueueFrame:Show()
+		TrinketMenu.OpenSort(2)
+	elseif TrinketMenu.CurrentlySorting then
 		TrinketMenu.PopulateSort(TrinketMenu.CurrentlySorting)
 	end
 end
@@ -133,16 +141,16 @@ function TrinketMenu.ValidateChecks()
 	local check,button
 	for i=1,table.getn(TrinketMenu.CheckOptInfo) do
 		check = TrinketMenu.CheckOptInfo[i]
-		button = getglobal("TrinketMenu_Opt"..check[1])
+		button = _G["TrinketMenu_Opt"..check[1]]
 		if button then
 			button:SetChecked(TrinketMenuOptions[check[1]]=="ON")
 			if check[5] then
 				if TrinketMenuOptions[check[5]]=="ON" then
 					button:Enable()
-					getglobal("TrinketMenu_Opt"..check[1].."Text"):SetTextColor(.95,.95,.95)
+					_G["TrinketMenu_Opt"..check[1].."Text"]:SetTextColor(.95,.95,.95)
 				else
 					button:Disable()
-					getglobal("TrinketMenu_Opt"..check[1].."Text"):SetTextColor(.5,.5,.5)
+					_G["TrinketMenu_Opt"..check[1].."Text"]:SetTextColor(.5,.5,.5)
 				end
 			end
 		end
@@ -150,6 +158,12 @@ function TrinketMenu.ValidateChecks()
 	TrinketMenu_OptColumnsSlider:SetAlpha((TrinketMenuOptions.SetColumns=="ON") and 1 or .5)
 	TrinketMenu_OptColumnsSlider:EnableMouse((TrinketMenuOptions.SetColumns=="ON") and 1 or 0)
 	TrinketMenu_OptColumnsSlider:SetValue(TrinketMenuOptions.Columns)
+
+	-- Handle MergedQueue checkbox separately (uses TrinketMenuQueue.MergedMode)
+	local mergedCheckbox = _G["TrinketMenu_OptMergedQueue"]
+	if mergedCheckbox and TrinketMenuQueue then
+		mergedCheckbox:SetChecked(TrinketMenuQueue.MergedMode)
+	end
 end
 
 function TrinketMenu.OptColumnsSlider_OnValueChanged()
@@ -164,6 +178,36 @@ end
 
 function TrinketMenu.CheckButton_OnClick()
 	local _,_,var = string.find(this:GetName(),"TrinketMenu_Opt(.+)")
+
+	-- Special handling for MergedQueue - it uses TrinketMenuQueue.MergedMode
+	if var == "MergedQueue" then
+		if TrinketMenuQueue then
+			TrinketMenuQueue.MergedMode = this:GetChecked() and true or false
+			PlaySound(this:GetChecked() and "igMainMenuOptionCheckBoxOn" or "igMainMenuOptionCheckBoxOff")
+			-- When enabling merged mode, also enable both slot queues
+			if TrinketMenuQueue.MergedMode then
+				TrinketMenuQueue.Enabled[0] = 1
+				TrinketMenuQueue.Enabled[1] = 1
+				TrinketMenu.ReflectQueueEnabled()
+				TrinketMenu.UpdateCombatQueue()
+			end
+			-- Hide slot tabs when merged mode is on
+			TrinketMenu.ReflectMergedMode()
+			-- Show the queue frame and open the sort list
+			if TrinketMenuQueue.MergedMode then
+				TrinketMenu_SubOptFrame:Hide()
+				TrinketMenu_SubQueueFrame:Show()
+				TrinketMenu.OpenSort(2)
+			else
+				-- When turning off merged mode, go back to top trinket (slot 0)
+				TrinketMenu_SubOptFrame:Hide()
+				TrinketMenu_SubQueueFrame:Show()
+				TrinketMenu.OpenSort(0)
+			end
+		end
+		return
+	end
+
 	if TrinketMenuOptions[var] then
 		TrinketMenuOptions[var] = this:GetChecked() and "ON" or "OFF"
 		PlaySound(this:GetChecked() and "igMainMenuOptionCheckBoxOn" or "igMainMenuOptionCheckBoxOff")
@@ -190,6 +234,47 @@ function TrinketMenu.CheckButton_OnClick()
 		TrinketMenu.ReflectKeyBindings()
 	elseif this==TrinketMenu_OptShowIcon then
 		TrinketMenu.MoveMinimapButton()
+	end
+end
+
+-- Reflects merged mode state in the UI
+function TrinketMenu.ReflectMergedMode()
+	if not TrinketMenuQueue then return end
+	local merged = TrinketMenuQueue.MergedMode
+	-- Update the checkbox state
+	local checkbox = _G["TrinketMenu_OptMergedQueue"]
+	if checkbox then
+		checkbox:SetChecked(merged)
+	end
+	-- Hide/show slot tabs based on mode
+	if TrinketMenu_Tab2 then
+		if merged then
+			TrinketMenu_Tab2:Hide()
+			TrinketMenu_Tab3:Hide()
+			if TrinketMenu_Tab4 then
+				TrinketMenu_Tab4:Show()
+			end
+			-- Re-anchor checkboxes to the left of Tab4 (both slots share one queue in merged mode)
+			if TrinketMenu_Trinket0Check and TrinketMenu_Trinket1Check then
+				TrinketMenu_Trinket0Check:ClearAllPoints()
+				TrinketMenu_Trinket0Check:SetPoint("RIGHT", TrinketMenu_Tab4, "LEFT", 0, 0)
+				TrinketMenu_Trinket1Check:ClearAllPoints()
+				TrinketMenu_Trinket1Check:SetPoint("RIGHT", TrinketMenu_Tab4, "LEFT", -24, 0)
+			end
+		else
+			TrinketMenu_Tab2:Show()
+			TrinketMenu_Tab3:Show()
+			if TrinketMenu_Tab4 then
+				TrinketMenu_Tab4:Hide()
+			end
+			-- Restore checkbox anchors to original positions
+			if TrinketMenu_Trinket0Check and TrinketMenu_Trinket1Check then
+				TrinketMenu_Trinket0Check:ClearAllPoints()
+				TrinketMenu_Trinket0Check:SetPoint("RIGHT", TrinketMenu_Tab3, "RIGHT", -4, 0)
+				TrinketMenu_Trinket1Check:ClearAllPoints()
+				TrinketMenu_Trinket1Check:SetPoint("RIGHT", TrinketMenu_Tab2, "RIGHT", -4, 0)
+			end
+		end
 	end
 end
 
@@ -226,7 +311,7 @@ function TrinketMenu.ReflectCooldownFont()
 end
 
 function TrinketMenu.SetCooldownFont(button)
-	local item = getglobal(button.."Time")
+	local item = _G[button.."Time"]
 	if TrinketMenuOptions.LargeCooldown=="ON" then
 		item:SetFont("Fonts\\FRIZQT__.TTF",16,"OUTLINE")
 		item:SetTextColor(1,.82,0,1)
@@ -263,21 +348,28 @@ function TrinketMenu.Tab_OnClick(override)
 	if TrinketMenu_ProfilesFrame then
 		TrinketMenu_ProfilesFrame:Hide()
 	end
-	for i=1,3 do
-		tab = getglobal("TrinketMenu_Tab"..i)
+	-- Unlock all tabs (including Tab4)
+	for i=1,4 do
+		tab = _G["TrinketMenu_Tab"..i]
 		if tab then
 			tab:UnlockHighlight()
 		end
 	end
-	getglobal("TrinketMenu_Tab"..id):LockHighlight()
+	_G["TrinketMenu_Tab"..id]:LockHighlight()
 	if id==1 then
 		TrinketMenu_SubOptFrame:Show()
 		if TrinketMenu_SubQueueFrame then
 			TrinketMenu_SubQueueFrame:Hide()
 		end
+	elseif id==4 then
+		-- Merged tab clicked
+		TrinketMenu_SubOptFrame:Hide()
+		TrinketMenu_SubQueueFrame:Show()
+		TrinketMenu.OpenSort(2)
 	else
 		TrinketMenu_SubOptFrame:Hide()
 		TrinketMenu_SubQueueFrame:Show()
-		TrinketMenu.OpenSort(3-this:GetID())
+		-- Tab 2 = Bottom (slot 1), Tab 3 = Top (slot 0)
+		TrinketMenu.OpenSort(3-id)
 	end
 end

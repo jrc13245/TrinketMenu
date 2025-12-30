@@ -5,11 +5,14 @@ TrinketMenu.PausedQueue = {} -- 0 or 1 whether queue is paused
 function TrinketMenu.QueueInit()
 	TrinketMenuQueue = TrinketMenuQueue or {
 		Stats = {}, -- indexed by id of trinket, delay, priority and keep
-		Sort = {}, -- indexed by number, ids in order of use
-		Enabled = {} -- 0 or 1 whether auto queue is on for the slot
+		Sort = {}, -- indexed by number, ids in order of use (0=top, 1=bottom, 2=merged)
+		Enabled = {}, -- 0 or 1 whether auto queue is on for the slot
+		MergedMode = false -- whether to use merged single-list mode
 	}
 	TrinketMenuQueue.Sort[0] = TrinketMenuQueue.Sort[0] or {}
 	TrinketMenuQueue.Sort[1] = TrinketMenuQueue.Sort[1] or {}
+	TrinketMenuQueue.Sort[2] = TrinketMenuQueue.Sort[2] or {} -- merged list
+	TrinketMenuQueue.MergedMode = TrinketMenuQueue.MergedMode or false
 	TrinketMenu_SubQueueFrame:SetBackdropBorderColor(.3,.3,.3,1)
 	TrinketMenu_ProfilesFrame:SetBackdropBorderColor(.3,.3,.3,1)
 	TrinketMenu_ProfilesListFrame:SetBackdropBorderColor(.3,.3,.3,1)
@@ -25,7 +28,55 @@ function TrinketMenu.QueueInit()
 	TrinketMenu_MainFrame:RegisterEvent("BAG_UPDATE")
 
 	TrinketMenuQueue.Profiles = TrinketMenuQueue.Profiles or {}
+	-- Migrate old profiles to new format
+	TrinketMenu.MigrateProfiles()
 	TrinketMenu.ValidateProfile()
+end
+
+-- Migrate old profile format to new format with all lists
+function TrinketMenu.MigrateProfiles()
+	for i = 1, table.getn(TrinketMenuQueue.Profiles) do
+		local profile = TrinketMenuQueue.Profiles[i]
+		-- Check if this is old format (has [2] but no .top key)
+		if profile[2] and not profile.top then
+			-- Old format detected, migrate
+			local migrated = { profile[1] } -- keep name at [1]
+			migrated.top = {}
+			migrated.bottom = {}
+			migrated.merged = {}
+			migrated.mergedMode = false
+			-- Copy old list to top slot
+			for j = 2, table.getn(profile) do
+				table.insert(migrated.top, profile[j])
+			end
+			-- Replace old profile with migrated one
+			TrinketMenuQueue.Profiles[i] = migrated
+		end
+	end
+end
+
+-- Helper function to copy a sort list
+function TrinketMenu.CopySortList(source)
+	local copy = {}
+	for i = 1, table.getn(source) do
+		table.insert(copy, source[i])
+		if source[i] == 0 then break end
+	end
+	return copy
+end
+
+-- Helper function to clear and populate a sort list from source
+function TrinketMenu.LoadSortList(dest, source)
+	-- Clear destination
+	for i = table.getn(dest), 1, -1 do
+		table.remove(dest, i)
+	end
+	-- Copy from source
+	if source then
+		for i = 1, table.getn(source) do
+			table.insert(dest, source[i])
+		end
+	end
 end
 
 function TrinketMenu.ReflectQueueEnabled()
@@ -34,6 +85,10 @@ function TrinketMenu.ReflectQueueEnabled()
 end	
 
 function TrinketMenu.OpenSort(which)
+	-- In merged mode, always sort list 2
+	if TrinketMenuQueue.MergedMode then
+		which = 2
+	end
 	TrinketMenu.CurrentlySorting = which
 	TrinketMenu.PopulateSort(which)
 	TrinketMenu.SortSelected = 0
@@ -81,8 +136,20 @@ end
 -- populates sorts adding any new trinkets
 function TrinketMenu.PopulateSort(which)
 	TrinketMenuQueue.Sort[which] = TrinketMenuQueue.Sort[which] or {}
-	TrinketMenu.AddToSort(which,TrinketMenu.GetID(which+13))
-	TrinketMenu.AddToSort(which,TrinketMenu.GetID((1-which)+13))
+
+	-- For merged mode (which=2), add both equipped trinkets
+	-- For normal mode, add the slot's trinket first, then the other
+	if which == 2 then
+		-- Merged mode: add both equipped trinkets
+		TrinketMenu.AddToSort(which, TrinketMenu.GetID(13))
+		TrinketMenu.AddToSort(which, TrinketMenu.GetID(14))
+	else
+		-- Normal mode: add this slot first, then the other
+		TrinketMenu.AddToSort(which, TrinketMenu.GetID(which+13))
+		TrinketMenu.AddToSort(which, TrinketMenu.GetID((1-which)+13))
+	end
+
+	-- Add all bagged trinkets
 	local equipLoc,id
 	for i=0,4 do
 		for j=1,GetContainerNumSlots(i) do
@@ -106,9 +173,9 @@ function TrinketMenu.SortScrollFrameUpdate()
 		local texture,name,quality
 		local item,itemName,itemIcon
 		for i=1,9 do
-			item = getglobal("TrinketMenu_Sort"..i)
-			itemName = getglobal("TrinketMenu_Sort"..i.."Name")
-			itemIcon = getglobal("TrinketMenu_Sort"..i.."Icon")
+			item = _G["TrinketMenu_Sort"..i]
+			itemName = _G["TrinketMenu_Sort"..i.."Name"]
+			itemIcon = _G["TrinketMenu_Sort"..i.."Icon"]
 			idx = offset+i
 			if idx<=table.getn(list) then
 				name,texture,quality = TrinketMenu.GetNameByID(list[idx])
@@ -131,17 +198,17 @@ function TrinketMenu.SortScrollFrameUpdate()
 end
 
 function TrinketMenu.LockHighlight(frame)
-	if type(frame)=="string" then frame = getglobal(frame) end
+	if type(frame)=="string" then frame = _G[frame] end
 	if not frame then return end
 	frame.lockedHighlight = 1
-	getglobal(frame:GetName().."Highlight"):Show()
+	_G[frame:GetName().."Highlight"]:Show()
 end
 
 function TrinketMenu.UnlockHighlight(frame)
-	if type(frame)=="string" then frame = getglobal(frame) end
+	if type(frame)=="string" then frame = _G[frame] end
 	if not frame then return end
 	frame.lockedHighlight = nil
-	getglobal(frame:GetName().."Highlight"):Hide()
+	_G[frame:GetName().."Highlight"]:Hide()
 end
 
 -- shows tooltip for items in the sort list
@@ -296,6 +363,16 @@ function TrinketMenu.UpdateBaggedTrinkets()
 end
 
 function TrinketMenu.TrinketNearReady(bag,slot)
+	-- Use Nampower's GetTrinketCooldown for equipped trinkets if available
+	if TrinketMenu.hasNampower and not slot and (bag==13 or bag==14) then
+		local trinketSlot = bag - 12 -- Convert 13/14 to 1/2
+		local cd = GetTrinketCooldown(trinketSlot)
+		if cd ~= -1 then
+			return (cd.isOnCooldown == 0 or cd.cooldownRemainingMs <= 30000) and 1 or nil
+		end
+	end
+
+	-- Fallback to vanilla API
 	local start,duration
 	if slot then
 		start,duration = GetContainerItemCooldown(bag,slot)
@@ -312,11 +389,51 @@ function TrinketMenu.CanCooldown(inv)
 	return enable==1
 end
 
+-- Returns cooldown remaining in seconds for an inventory slot (13 or 14)
+function TrinketMenu.GetCooldownRemaining(invSlot)
+	-- Use Nampower if available
+	if TrinketMenu.hasNampower then
+		local trinketSlot = invSlot - 12 -- Convert 13/14 to 1/2
+		local cd = GetTrinketCooldown(trinketSlot)
+		if cd ~= -1 then
+			return cd.cooldownRemainingMs / 1000
+		end
+	end
+
+	-- Fallback to vanilla API
+	local start, duration = GetInventoryItemCooldown("player", invSlot)
+	if start == 0 then
+		return 0
+	end
+	return math.max(0, duration - (GetTime() - start))
+end
+
 -- this function quickly checks if conditions are right for a possible ProcessAutoQueue
 function TrinketMenu.PeriodicQueueCheck()
-	for i=0,1 do
-		if TrinketMenuQueue.Enabled[i] then
-			TrinketMenu.ProcessAutoQueue(i)
+	if TrinketMenuQueue.MergedMode then
+		-- In merged mode, process the slot with the longest cooldown first
+		-- This maximizes uptime on higher-priority trinkets
+		local cd0 = TrinketMenu.GetCooldownRemaining(13)
+		local cd1 = TrinketMenu.GetCooldownRemaining(14)
+		local first, second
+		if cd0 >= cd1 then
+			first, second = 0, 1
+		else
+			first, second = 1, 0
+		end
+		-- Process both slots but check enabled state
+		if TrinketMenuQueue.Enabled[first] then
+			TrinketMenu.ProcessAutoQueue(first)
+		end
+		if TrinketMenuQueue.Enabled[second] then
+			TrinketMenu.ProcessAutoQueue(second)
+		end
+	else
+		-- Normal mode: process each slot independently
+		for i=0,1 do
+			if TrinketMenuQueue.Enabled[i] then
+				TrinketMenu.ProcessAutoQueue(i)
+			end
 		end
 	end
 end
@@ -326,7 +443,7 @@ function TrinketMenu.ProcessAutoQueue(which)
 
 	local start,duration,enable = GetInventoryItemCooldown("player",13+which)
 	local _,_,id,name = string.find(GetInventoryItemLink("player",13+which) or "","item:(%d+).+%[(.+)%]")
-	local icon = getglobal("TrinketMenu_Trinket"..which.."Queue") 
+	local icon = _G["TrinketMenu_Trinket"..which.."Queue"]
 
 	if not id then return end -- leave if no trinket equipped
 	if IsInventoryItemLocked(13+which) then return end -- leave if slot being swapped
@@ -358,7 +475,20 @@ function TrinketMenu.ProcessAutoQueue(which)
 		TrinketMenu.CombatQueue[which] = nil
 		TrinketMenu.UpdateCombatQueue()
 	end
-	local list,rank = TrinketMenuQueue.Sort[which]
+
+	-- In merged mode, use Sort[2]; otherwise use Sort[which]
+	local list,rank = TrinketMenuQueue.MergedMode and TrinketMenuQueue.Sort[2] or TrinketMenuQueue.Sort[which]
+
+	-- Get the ID of trinket in the OTHER slot (for merged mode skip check)
+	local otherSlotId
+	if TrinketMenuQueue.MergedMode then
+		local otherSlot = (which == 0) and 14 or 13
+		local otherLink = GetInventoryItemLink("player", otherSlot)
+		if otherLink then
+			_,_,otherSlotId = string.find(otherLink, "item:(%d+)")
+		end
+	end
+
 	for i=1,table.getn(list) do
 		if list[i]==0 then rank=i break end
 		if ready and list[i]==id then rank=i break end
@@ -366,7 +496,12 @@ function TrinketMenu.ProcessAutoQueue(which)
 	if rank then
 		local bag,slot
 		for i=1,rank do
-			if not ready or enable==0 or (TrinketMenuQueue.Stats[list[i]] and TrinketMenuQueue.Stats[list[i]].priority) then
+			-- In merged mode, skip trinkets already equipped in either slot
+			if TrinketMenuQueue.MergedMode and otherSlotId and tostring(list[i]) == otherSlotId then
+				-- Skip this trinket, it's in the other slot
+			elseif TrinketMenuQueue.MergedMode and tostring(list[i]) == id then
+				-- Skip this trinket, it's in the current slot
+			elseif not ready or enable==0 or (TrinketMenuQueue.Stats[list[i]] and TrinketMenuQueue.Stats[list[i]].priority) then
 				name = GetItemInfo(list[i]) or ""
 				if TrinketMenu.WatchItem[name] then
 					bag,slot = TrinketMenu.WatchItem[name].bag,TrinketMenu.WatchItem[name].slot
@@ -423,7 +558,10 @@ function TrinketMenu.SetQueue(which,...)
 		TrinketMenu.PausedQueue[which]=nil
 	elseif arg[1]=="SORT" and table.getn(arg)>1 then
 		local sortidx,inv,bag,slot,id = 1
-		table.setn(TrinketMenuQueue.Sort[which],0)
+		-- Clear the sort list
+		for i = table.getn(TrinketMenuQueue.Sort[which]), 1, -1 do
+			table.remove(TrinketMenuQueue.Sort[which], i)
+		end
 		local profile = TrinketMenu.GetProfileID(arg[2])
 		if profile then
 			for i=2,table.getn(TrinketMenuQueue.Profiles[profile]) do
@@ -522,9 +660,9 @@ function TrinketMenu.ProfileScrollFrameUpdate()
 	local item
 	for i=1,7 do
 		idx = offset+i
-		item = getglobal("TrinketMenu_Profile"..i)
+		item = _G["TrinketMenu_Profile"..i]
 		if idx<=table.getn(list) then
-			getglobal("TrinketMenu_Profile"..i.."Name"):SetText(list[idx][1])
+			_G["TrinketMenu_Profile"..i.."Name"]:SetText(list[idx][1])
 			item:Show()
 			if TrinketMenu.ProfileSelected==idx then
 				item:LockHighlight()
@@ -600,15 +738,13 @@ function TrinketMenu.ProfilesButton_OnClick()
 		if idx and TrinketMenuQueue.Profiles[idx] then
 			table.remove(TrinketMenuQueue.Profiles,idx)
 		end
-		table.insert(TrinketMenuQueue.Profiles,1,{name})
-		local list = TrinketMenuQueue.Sort[TrinketMenu.CurrentlySorting]
-		local save = TrinketMenuQueue.Profiles[1]
-		for i=1,table.getn(list) do
-			table.insert(save,list[i])
-			if list[i]==0 then
-				break
-			end
-		end
+		-- Create new profile with all lists
+		local save = { name }
+		save.top = TrinketMenu.CopySortList(TrinketMenuQueue.Sort[0])
+		save.bottom = TrinketMenu.CopySortList(TrinketMenuQueue.Sort[1])
+		save.merged = TrinketMenu.CopySortList(TrinketMenuQueue.Sort[2])
+		save.mergedMode = TrinketMenuQueue.MergedMode
+		table.insert(TrinketMenuQueue.Profiles, 1, save)
 		TrinketMenu_ProfilesFrame:Hide()
 	elseif this==TrinketMenu_ProfilesLoad then
 		TrinketMenu.LoadProfile(TrinketMenu.CurrentlySorting,idx)
@@ -627,14 +763,31 @@ function TrinketMenu.ProfileList_OnDoubleClick()
 end
 
 function TrinketMenu.LoadProfile(which,idx)
-	local list = TrinketMenuQueue.Sort[which]
 	local load = TrinketMenuQueue.Profiles[idx]
-	table.setn(list,0)
-	for i=2,table.getn(load) do
-		table.insert(list,load[i])
+	if not load then return end
+
+	-- Check if this is new format (has .top key) or old format
+	if load.top then
+		-- New format: load all lists
+		TrinketMenu.LoadSortList(TrinketMenuQueue.Sort[0], load.top)
+		TrinketMenu.LoadSortList(TrinketMenuQueue.Sort[1], load.bottom)
+		TrinketMenu.LoadSortList(TrinketMenuQueue.Sort[2], load.merged)
+		if load.mergedMode ~= nil then
+			TrinketMenuQueue.MergedMode = load.mergedMode
+		end
+	else
+		-- Old format: load to specified slot only (backwards compatibility)
+		local list = TrinketMenuQueue.Sort[which]
+		for i = table.getn(list), 1, -1 do
+			table.remove(list, i)
+		end
+		for i=2,table.getn(load) do
+			table.insert(list,load[i])
+		end
 	end
+
 	TrinketMenu_ProfilesFrame:Hide()
-	TrinketMenu.OpenSort(which)
+	TrinketMenu.OpenSort(TrinketMenuQueue.MergedMode and 2 or which)
 	if TrinketMenuOptions.HideOnLoad=="ON" then
 		TrinketMenu_OptFrame:Hide()
 	end

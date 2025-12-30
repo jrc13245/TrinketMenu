@@ -1,6 +1,6 @@
 ## Interface: 11200
 ## Title: TrinketMenu - Fix
-## Author: Gello
+## Author: Gello, Torio
 ## Notes: AddOn to manage trinkets, fix by Ogrisch
 ## SavedVariables: TrinketMenuOptions
 ## SavedVariablesPerCharacter: TrinketMenuPerOptions, TrinketMenuQueue

@@ -392,6 +392,16 @@
 							</Anchor>
 						</Anchors>
 					</CheckButton>
+					<CheckButton name="TrinketMenu_OptMergedQueue" inherits="TrinketMenu_CheckButtonTemplate">
+						<Anchors>
+							<Anchor point="TOPLEFT" relativeTo="TrinketMenu_OptStopOnSwap" relativePoint="BOTTOMLEFT"/>
+						</Anchors>
+					</CheckButton>
+					<CheckButton name="TrinketMenu_OptHideOnLoad" inherits="TrinketMenu_CheckButtonTemplate">
+						<Anchors>
+							<Anchor point="TOPLEFT" relativeTo="TrinketMenu_OptMergedQueue" relativePoint="BOTTOMLEFT"/>
+						</Anchors>
+					</CheckButton>
 
 				</Frames>
 			</Frame>
