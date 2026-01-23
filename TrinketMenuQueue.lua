@@ -181,6 +181,10 @@ function TrinketMenu.SortScrollFrameUpdate()
 				name,texture,quality = TrinketMenu.GetNameByID(list[idx])
 				itemIcon:SetTexture(texture)
 				itemName:SetText(name)
+				if not quality then
+					GetItemInfo(list[idx]) -- request cache
+					quality = 2 -- fallback to uncommon/green
+				end
 				r,g,b = GetItemQualityColor(quality)
 				itemName:SetTextColor(r,g,b)
 				itemIcon:SetVertexColor(1,1,1)
