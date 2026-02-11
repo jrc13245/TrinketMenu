@@ -104,14 +104,24 @@ function TrinketMenu.GetID(bag,slot)
 	else
 		_,_,id = string.find(GetInventoryItemLink("player",bag) or "","item:(%d+)")
 	end
-	return id
+	return tonumber(id)
 end
 
 function TrinketMenu.GetNameByID(id)
-	if id==0 then
+	id = tonumber(id)
+	if not id or id==0 then
 		return "-- stop queue here --","Interface\\Buttons\\UI-GroupLoot-Pass-Up",1
+	elseif TrinketMenu.hasNampower then
+		local name = GetItemStatsField(id,"displayName")
+		local displayInfoId = GetItemStatsField(id,"displayInfoID")
+		local texture = displayInfoId and GetItemIconTexture(displayInfoId)
+		if not texture then
+			_,_,_,_,_,_,_,_,texture = GetItemInfo(id)
+		end
+		local quality = GetItemStatsField(id,"quality")
+		return name,texture,quality
 	else
-		local name,_,quality,_,_,_,_,_,texture = GetItemInfo(id or "")
+		local name,_,quality,_,_,_,_,_,texture = GetItemInfo(id)
 		return name,texture,quality
 	end
 end
@@ -150,13 +160,22 @@ function TrinketMenu.PopulateSort(which)
 	end
 
 	-- Add all bagged trinkets
-	local equipLoc,id
-	for i=0,4 do
-		for j=1,GetContainerNumSlots(i) do
-			id = TrinketMenu.GetID(i,j)
-			_,_,_,_,_,_,_,equipLoc = GetItemInfo(id or "")
-			if equipLoc=="INVTYPE_TRINKET" then
-				TrinketMenu.AddToSort(which,id)
+	if TrinketMenu.hasNampower then
+		local trinkets = GetTrinkets()
+		for _,t in ipairs(trinkets) do
+			if t.bagIndex ~= nil then
+				TrinketMenu.AddToSort(which,t.itemId)
+			end
+		end
+	else
+		local equipLoc,id
+		for i=0,4 do
+			for j=1,GetContainerNumSlots(i) do
+				id = TrinketMenu.GetID(i,j)
+				_,_,_,_,_,_,_,equipLoc = GetItemInfo(id or "")
+				if equipLoc=="INVTYPE_TRINKET" then
+					TrinketMenu.AddToSort(which,id)
+				end
 			end
 		end
 	end
@@ -353,16 +372,28 @@ end
 --[[ Auto queue processing ]]
 
 function TrinketMenu.UpdateBaggedTrinkets()
-	local id,name,equipLoc
-	for i in TrinketMenu.BagsNeedUpdating do
-		for j=1,GetContainerNumSlots(i) do
-			_,_,id = string.find(GetContainerItemLink(i,j) or "","item:(%d+)")
-			name,_,_,_,_,_,_,equipLoc = GetItemInfo(id or "")
-			if equipLoc=="INVTYPE_TRINKET" then
-				TrinketMenu.AddWatchItem(name,nil,i,j)
+	if TrinketMenu.hasNampower then
+		local trinkets = GetTrinkets()
+		for _,t in ipairs(trinkets) do
+			if t.bagIndex ~= nil then
+				TrinketMenu.AddWatchItem(t.trinketName,nil,t.bagIndex,t.slotIndex)
 			end
 		end
-		TrinketMenu.BagsNeedUpdating[i] = nil
+		for i in TrinketMenu.BagsNeedUpdating do
+			TrinketMenu.BagsNeedUpdating[i] = nil
+		end
+	else
+		local id,name,equipLoc
+		for i in TrinketMenu.BagsNeedUpdating do
+			for j=1,GetContainerNumSlots(i) do
+				_,_,id = string.find(GetContainerItemLink(i,j) or "","item:(%d+)")
+				name,_,_,_,_,_,_,equipLoc = GetItemInfo(id or "")
+				if equipLoc=="INVTYPE_TRINKET" then
+					TrinketMenu.AddWatchItem(name,nil,i,j)
+				end
+			end
+			TrinketMenu.BagsNeedUpdating[i] = nil
+		end
 	end
 end
 
@@ -447,6 +478,7 @@ function TrinketMenu.ProcessAutoQueue(which)
 
 	local start,duration,enable = GetInventoryItemCooldown("player",13+which)
 	local _,_,id,name = string.find(GetInventoryItemLink("player",13+which) or "","item:(%d+).+%[(.+)%]")
+	id = tonumber(id)
 	local icon = _G["TrinketMenu_Trinket"..which.."Queue"]
 
 	if not id then return end -- leave if no trinket equipped
@@ -489,7 +521,8 @@ function TrinketMenu.ProcessAutoQueue(which)
 		local otherSlot = (which == 0) and 14 or 13
 		local otherLink = GetInventoryItemLink("player", otherSlot)
 		if otherLink then
-			_,_,otherSlotId = string.find(otherLink, "item:(%d+)")
+			local _,_,oid = string.find(otherLink, "item:(%d+)")
+			otherSlotId = tonumber(oid)
 		end
 	end
 
@@ -501,9 +534,9 @@ function TrinketMenu.ProcessAutoQueue(which)
 		local bag,slot
 		for i=1,rank do
 			-- In merged mode, skip trinkets already equipped in either slot
-			if TrinketMenuQueue.MergedMode and otherSlotId and tostring(list[i]) == otherSlotId then
+			if TrinketMenuQueue.MergedMode and otherSlotId and list[i] == otherSlotId then
 				-- Skip this trinket, it's in the other slot
-			elseif TrinketMenuQueue.MergedMode and tostring(list[i]) == id then
+			elseif TrinketMenuQueue.MergedMode and list[i] == id then
 				-- Skip this trinket, it's in the current slot
 			elseif not ready or enable==0 or (TrinketMenuQueue.Stats[list[i]] and TrinketMenuQueue.Stats[list[i]].priority) then
 				name = GetItemInfo(list[i]) or ""
@@ -539,8 +572,8 @@ end
 -- (a "stop the queue" is assumed at the end of the list)
 function TrinketMenu.SetQueue(which,...)
 	local errorstub = "|cFFBBBBBBTrinketMenu:|cFFFFFFFF "
-	if not which or not tonumber(which) or which<0 or which>1 then
-		DEFAULT_CHAT_FRAME:AddMessage(errorstub.."First parameter must be 0 for top trinket or 1 for bottom.")
+	if not which or not tonumber(which) or which<0 or which>2 then
+		DEFAULT_CHAT_FRAME:AddMessage(errorstub.."First parameter must be 0 for top trinket, 1 for bottom, or 2 for merged.")
 		return
 	end
 	if table.getn(arg)<1 then
@@ -568,8 +601,20 @@ function TrinketMenu.SetQueue(which,...)
 		end
 		local profile = TrinketMenu.GetProfileID(arg[2])
 		if profile then
-			for i=2,table.getn(TrinketMenuQueue.Profiles[profile]) do
-				table.insert(TrinketMenuQueue.Sort[which],TrinketMenuQueue.Profiles[profile][i])
+			local pdata = TrinketMenuQueue.Profiles[profile]
+			if pdata.top then
+				-- New format profile: load all lists
+				TrinketMenu.LoadSortList(TrinketMenuQueue.Sort[0], pdata.top)
+				TrinketMenu.LoadSortList(TrinketMenuQueue.Sort[1], pdata.bottom)
+				TrinketMenu.LoadSortList(TrinketMenuQueue.Sort[2], pdata.merged)
+				if pdata.mergedMode ~= nil then
+					TrinketMenuQueue.MergedMode = pdata.mergedMode
+				end
+			else
+				-- Old format profile: load to specified slot
+				for i=2,table.getn(pdata) do
+					table.insert(TrinketMenuQueue.Sort[which],pdata[i])
+				end
 			end
 		else
 			for i=2,table.getn(arg) do

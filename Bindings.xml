@@ -3,9 +3,9 @@
 		TrinketMenu.ToggleFrame(TrinketMenuOptions.DisableToggle=="ON" and TrinketMenu_OptFrame or TrinketMenu_MainFrame)
 	</Binding>
 	<Binding name="Use Top Trinket" description="Use Top Trinket">
-		UseInventoryItem(13)
+		if TrinketMenu.hasNampower then UseTrinket(13) else UseInventoryItem(13) end
 	</Binding>
 	<Binding name="Use Bottom Trinket" description="Use Bottom Trinket">
-		UseInventoryItem(14)
+		if TrinketMenu.hasNampower then UseTrinket(14) else UseInventoryItem(14) end
 	</Binding>
 </Bindings>

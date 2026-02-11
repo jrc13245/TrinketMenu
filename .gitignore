@@ -1,6 +1,8 @@
-.claude
-.git
+wow-api-type-definitions/
+.gitignore
 CLAUDE.md
-SuperWoW_Wiki.txt
+AddonsForCompatibility/
 Nampower_Wiki.txt
+SuperWoW_Wiki.txt
 UnitXP_SP3_Wiki.txt
+.claude/
