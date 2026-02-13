@@ -366,12 +366,20 @@ function TrinketMenu.UpdateBaggedTrinkets()
 	end
 end
 
-function TrinketMenu.TrinketNearReady(bag,slot)
+function TrinketMenu.TrinketNearReady(bag,slot,itemId)
 	-- Use Nampower's GetTrinketCooldown for equipped trinkets if available
 	if TrinketMenu.hasNampower and not slot and (bag==13 or bag==14) then
 		local trinketSlot = bag - 12 -- Convert 13/14 to 1/2
 		local cd = GetTrinketCooldown(trinketSlot)
 		if cd ~= -1 then
+			return (cd.isOnCooldown == 0 or cd.cooldownRemainingMs <= 30000) and 1 or nil
+		end
+	end
+
+	-- Use Nampower's GetItemIdCooldown for bagged trinkets if available
+	if TrinketMenu.hasGetItemIdCooldown and itemId and itemId ~= 0 then
+		local cd = GetItemIdCooldown(itemId)
+		if cd then
 			return (cd.isOnCooldown == 0 or cd.cooldownRemainingMs <= 30000) and 1 or nil
 		end
 	end
@@ -445,9 +453,29 @@ end
 -- which = 0 or 1, decides if a trinket should be equipped and equips if so
 function TrinketMenu.ProcessAutoQueue(which)
 
-	local start,duration,enable = GetInventoryItemCooldown("player",13+which)
+	local start,duration,enable
+	if TrinketMenu.hasNampower then
+		local cd = GetTrinketCooldown(which+1)
+		if cd ~= -1 then
+			enable = cd.itemHasActiveSpell
+			if cd.isOnIndividualCooldown == 1 then
+				start = cd.individualStartS
+				duration = cd.individualDurationMs / 1000
+			elseif cd.isOnCategoryCooldown == 1 then
+				start = cd.categoryStartS
+				duration = cd.categoryDurationMs / 1000
+			else
+				start = 0
+				duration = 0
+			end
+		else
+			start,duration,enable = 0,0,0
+		end
+	else
+		start,duration,enable = GetInventoryItemCooldown("player",13+which)
+	end
 	local _,_,id,name = string.find(GetInventoryItemLink("player",13+which) or "","item:(%d+).+%[(.+)%]")
-	local icon = _G["TrinketMenu_Trinket"..which.."Queue"]
+	local icon = TrinketMenu.QueueIcons[which]
 
 	if not id then return end -- leave if no trinket equipped
 	if IsInventoryItemLocked(13+which) then return end -- leave if slot being swapped
@@ -501,9 +529,9 @@ function TrinketMenu.ProcessAutoQueue(which)
 		local bag,slot
 		for i=1,rank do
 			-- In merged mode, skip trinkets already equipped in either slot
-			if TrinketMenuQueue.MergedMode and otherSlotId and tostring(list[i]) == otherSlotId then
+			if TrinketMenuQueue.MergedMode and otherSlotId and list[i] == otherSlotId then
 				-- Skip this trinket, it's in the other slot
-			elseif TrinketMenuQueue.MergedMode and tostring(list[i]) == id then
+			elseif TrinketMenuQueue.MergedMode and list[i] == id then
 				-- Skip this trinket, it's in the current slot
 			elseif not ready or enable==0 or (TrinketMenuQueue.Stats[list[i]] and TrinketMenuQueue.Stats[list[i]].priority) then
 				name = GetItemInfo(list[i]) or ""
@@ -511,7 +539,7 @@ function TrinketMenu.ProcessAutoQueue(which)
 					bag,slot = TrinketMenu.WatchItem[name].bag,TrinketMenu.WatchItem[name].slot
 					if bag then
 						if string.find(GetContainerItemLink(bag,slot) or "",name,1,1) then
-							if TrinketMenu.TrinketNearReady(bag,slot) then
+							if TrinketMenu.TrinketNearReady(bag,slot,list[i]) then
 								if TrinketMenu.CombatQueue[which]~=name then
 									TrinketMenu.EquipTrinketByName(name,13+which)
 								end
